@@ -22,24 +22,117 @@ pnpm add @sorocrew/provider
 
 ---
 
-## Usage
+## Quick Start
 
-### In your dApp Frontend
+### Core Methods
 
 ```typescript
-import { isConnected, getPublicKey, getNetwork } from '@sorocrew/provider';
+import { isConnected, getPublicKey, getNetwork, signTransaction } from '@sorocrew/provider';
 
-// Check if provider is available
+// 1. Check if mock provider is active in the current frame
 const connected = await isConnected();
 
-// Fetch active signer public key
+// 2. Fetch active signer public key (mock Freighter keypair)
 const publicKey = await getPublicKey();
 console.log('Active Public Key:', publicKey);
 
-// Listen to Network Changes triggered by SoroCrew Studio Header Toggler
-window.sorocrew.on('networkChange', (details) => {
-  console.log('Switched to network:', details.networkUrl);
-});
+// 3. Read current runtime network endpoint
+const networkUrl = await getNetwork();
+console.log('Target Network:', networkUrl);
+
+// 4. Sign Soroban Transaction Envelope XDR
+const signedXdr = await signTransaction(xdrBase64, { networkPassphrase });
+```
+
+---
+
+## Framework Integrations
+
+### React & Vite (`useSoroCrew` Custom Hook)
+
+A reusable hook handling connection lifecycle and automatic event listener teardown. See full code in [`examples/react-vite-example.tsx`](./examples/react-vite-example.tsx).
+
+```tsx
+import React, { useState, useEffect, useCallback } from 'react';
+import { isConnected, getPublicKey, getNetwork } from '@sorocrew/provider';
+
+export function useSoroCrew() {
+  const [wallet, setWallet] = useState<{ connected: boolean; publicKey: string | null; network: string | null }>({
+    connected: false,
+    publicKey: null,
+    network: null,
+  });
+
+  const sync = useCallback(async () => {
+    if (await isConnected()) {
+      const [publicKey, network] = await Promise.all([getPublicKey(), getNetwork()]);
+      setWallet({ connected: true, publicKey, network });
+    }
+  }, []);
+
+  useEffect(() => {
+    sync();
+
+    // Listen to network changes triggered from SoroCrew Studio
+    const onNetwork = (details: { networkUrl: string }) => {
+      setWallet((prev) => ({ ...prev, network: details.networkUrl }));
+    };
+
+    if (typeof window !== 'undefined' && window.sorocrew) {
+      window.sorocrew.on('networkChange', onNetwork);
+    }
+
+    // Teardown listener on component unmount
+    return () => {
+      if (typeof window !== 'undefined' && window.sorocrew?.off) {
+        window.sorocrew.off('networkChange', onNetwork);
+      }
+    };
+  }, [sync]);
+
+  return { ...wallet, reconnect: sync };
+}
+```
+
+### Next.js (App Router Client Component)
+
+In Next.js 13+ / 14+ / 15+, mark your wallet component with `'use client'`:
+
+```tsx
+'use client';
+
+import { useSoroCrew } from '@/hooks/useSoroCrew';
+
+export function ConnectWalletHeader() {
+  const { connected, publicKey, network } = useSoroCrew();
+
+  if (!connected) {
+    return <span className="text-gray-500">Provider not detected</span>;
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <span className="font-mono text-sm">{publicKey?.slice(0, 6)}...{publicKey?.slice(-4)}</span>
+      <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded">{network}</span>
+    </div>
+  );
+}
+```
+
+---
+
+## Event Listener Cleanup Patterns
+
+Always unregister SoroCrew event listeners when destroying component scopes to prevent memory leaks in single-page applications:
+
+```typescript
+// Subscribe
+window.sorocrew.on('networkChange', handleNetworkChange);
+window.sorocrew.on('accountChange', handleAccountChange);
+
+// Unsubscribe
+window.sorocrew.off('networkChange', handleNetworkChange);
+window.sorocrew.off('accountChange', handleAccountChange);
 ```
 
 ---
